@@ -1,3 +1,25 @@
+---
+tags:
+  - Leadership
+  - CustomerService
+  - Tech
+  - RetailMgmt
+  - CommunityManagement
+  - TechSupport
+  - RetailLeadership
+  - OperationalExcellence
+  - ASU
+  - CareerJourney
+  - LeadershipGrowth
+  - CustomerFocus
+  - TechInnovation
+  - ContinuousLearning
+  - ImpactDriven
+  - StrategicLeadership
+  - CustomerExperience
+  - Innovation
+  - FutureFocused
+---
 Absolutely! Let's craft a concise bio under 500 characters while highlighting the key strengths and experiences from the provided context.
 
 **Option 1 (Focus on Tech & Leadership):**
