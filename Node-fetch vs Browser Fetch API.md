@@ -1,0 +1,7 @@
+node-fetch vs. browser fetch API differences:                                                                                                                                             
+    • node-fetch has a different type system for RequestInfo, RequestInit, and Response compared to the browser's fetch API.                                                                 
+    • The Response object from node-fetch lacks certain properties (e.g., buffer, size, textConverted, timeout) that are expected in the browser's Response.                                 
+ 2 Polyfills not recognized by TypeScript:                                                                                                                                                   
+    • Runtime polyfills for Response properties do not update the TypeScript type definitions, leading to type errors.                                                                       
+ 3 TypeScript's strict type checking:                                                                                                                                                        
+    • TypeScript enforces strict compatibility between safeFetch and fetch, and between node-fetch Response and browser Response.   
