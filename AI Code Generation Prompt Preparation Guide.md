@@ -8,6 +8,14 @@ tags:
   - "#code-generation"
   - "#prompt-engineering"
   - "#ai-integration"
+  - code-examples
+  - documentation
+  - best-practices
+  - code-implementation
+  - api-usage
+  - code-generation
+  - prompt-engineering
+  - ai-integration
 ---
 
 # AI Code Generation Prompt Guide
