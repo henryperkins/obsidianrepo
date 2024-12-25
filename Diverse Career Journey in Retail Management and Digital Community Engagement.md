@@ -1,0 +1,9 @@
+With over five years of experience in retail management, complemented by a strong foundation in web technologies and online community engagement, my career has been both diverse and rewarding.  
+
+At PageLines, Inc., I served as a Community Manager, facilitating an App Store for plugins, extensions, and themes. By nurturing a developer community of 25-50 WordPress professionals, I honed my digital marketing skills and formed strategic brand partnerships. This role also introduced me to affiliate marketing management, enabling passive income generation for affiliates.  
+
+As a Happiness Engineer at Automattic, I provided technical and billing support to WordPress.com users. I efficiently addressed user issues and contributed to product improvement discussions using platforms like Skype, IRC, Slack, and G-Suite, enhancing my problem-solving and collaborative skills.  
+
+In retail management, I began at Sodexo as a Manager, leading a large team to achieve significant weekly sales volumes. At Starbucks, as a Shift Supervisor, I combined my managerial skills with a commitment to customer satisfaction, health, and safety standards, ensuring a positive customer experience and compliance with regulatory guidelines.  
+
+Currently, I am pursuing a Bachelor's degree in Organizational Leadership at Arizona State University, with an expected graduation in June 2026. I aim to integrate my tech-savvy background with my managerial experience in retail to contribute to collaborative, quality-driven, and community-focused environments. My career path, spanning both digital and retail sectors, demonstrates my adaptability and readiness to excel in roles requiring technical proficiency and leadership.  
