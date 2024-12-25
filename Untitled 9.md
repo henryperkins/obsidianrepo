@@ -1,516 +1,220 @@
-```typescript
-import { CustomModel, ModelConfig, setModelKey } from "@/aiParams";
-import { BUILTIN_CHAT_MODELS, ChatModelProviders } from "@/constants";
-import { getDecryptedKey } from "@/encryptionService";
-import { getSettings, subscribeToSettingsChange } from "@/settings/model";
-import { HarmBlockThreshold, HarmCategory } from "@google/generative-ai";
-import { ChatCohere } from "@langchain/cohere";
-import { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import { ChatGroq } from "@langchain/groq";
-import { ChatOllama } from "@langchain/ollama";
-import { ChatOpenAI } from "@langchain/openai";
-import { Notice } from "obsidian";
-import { safeFetch } from "@/utils";
-import { ChatAnthropic } from "@langchain/anthropic";
+# Untitled 9
 
-type ChatConstructorType = new (config: any) => BaseChatModel;
+```python
+"""
+Template-aware orchestration system for managing LLM providers and docstring generation.
+"""
 
-const CHAT_PROVIDER_CONSTRUCTORS = {
-  [ChatModelProviders.OPENAI]: ChatOpenAI,
-  [ChatModelProviders.AZURE_OPENAI]: ChatOpenAI,
-  [ChatModelProviders.ANTHROPIC]: ChatAnthropic,
-  [ChatModelProviders.COHEREAI]: ChatCohere,
-  [ChatModelProviders.GOOGLE]: ChatGoogleGenerativeAI,
-  [ChatModelProviders.OPENROUTERAI]: ChatOpenAI,
-  [ChatModelProviders.OLLAMA]: ChatOllama,
-  [ChatModelProviders.LM_STUDIO]: ChatOpenAI,
-  [ChatModelProviders.GROQ]: ChatGroq,
-  [ChatModelProviders.OPENAI_FORMAT]: ChatOpenAI,
-} as const;
+from typing import Dict, Any, Optional, List, Type
+from dataclasses import dataclass
+import asyncio
+from datetime import datetime
 
-type ChatProviderConstructMap = typeof CHAT_PROVIDER_CONSTRUCTORS;
+from .providers import BaseLLMProvider, ClaudeProvider
+from .templates import DocstringStyle, DocstringTemplate
+from .storage import Storage
+from .logger import get_logger
 
-export default class ChatModelManager {
-  private static instance: ChatModelManager;
-  private static chatModel: BaseChatModel;
-  private static modelMap: Record<
-    string,
-    {
-      hasApiKey: boolean;
-      AIConstructor: ChatConstructorType;
-      vendor: string;
-    }
-  >;
+logger = get_logger(__name__)
 
-  private readonly providerApiKeyMap: Record<ChatModelProviders, () => string> = {
-    [ChatModelProviders.OPENAI]: () => getSettings().openAIApiKey,
-    [ChatModelProviders.GOOGLE]: () => getSettings().googleApiKey,
-    [ChatModelProviders.AZURE_OPENAI]: () => getSettings().azureOpenAIApiKey,
-    [ChatModelProviders.ANTHROPIC]: () => getSettings().anthropicApiKey,
-    [ChatModelProviders.COHEREAI]: () => getSettings().cohereApiKey,
-    [ChatModelProviders.OPENROUTERAI]: () => getSettings().openRouterAiApiKey,
-    [ChatModelProviders.GROQ]: () => getSettings().groqApiKey,
-    [ChatModelProviders.OLLAMA]: () => "default-key",
-    [ChatModelProviders.LM_STUDIO]: () => "default-key",
-    [ChatModelProviders.OPENAI_FORMAT]: () => "default-key",
-  } as const;
+@dataclass
+class GenerationConfig:
+    """Configuration for docstring generation."""
+    max_retries: int = 3
+    timeout: float = 30.0
+    cache_ttl: int = 3600
+    parallel_attempts: int = 2
 
-  private constructor() {
-    this.buildModelMap();
-    subscribeToSettingsChange(() => this.buildModelMap());
-  }
+@dataclass
+class GenerationResult:
+    """Result of docstring generation."""
+    content: Dict[str, Any]
+    provider: str
+    style: DocstringStyle
+    tokens_used: int
+    generation_time: float
+    from_cache: bool = False
 
-  static getInstance(): ChatModelManager {
-    if (!ChatModelManager.instance) {
-      ChatModelManager.instance = new ChatModelManager();
-    }
-    return ChatModelManager.instance;
-  }
-
-  private getModelConfig(customModel: CustomModel): ModelConfig {
-    const settings = getSettings();
-
-    // Check if the model starts with "o1"
-    const modelName = customModel.name;
-    const isO1Model = modelName.startsWith("o1");
-    const baseConfig: ModelConfig = {
-      modelName: modelName,
-      temperature: settings.temperature,
-      streaming: true,
-      maxRetries: 3,
-      maxConcurrency: 3,
-      enableCors: customModel.enableCors,
-    };
-
-    const providerConfig: {
-      [K in keyof ChatProviderConstructMap]: ConstructorParameters<ChatProviderConstructMap[K]>[0];
-    } = {
-      [ChatModelProviders.OPENAI]: {
-        modelName: modelName,
-        openAIApiKey: getDecryptedKey(customModel.apiKey || settings.openAIApiKey),
-        configuration: {
-          baseURL: customModel.baseUrl,
-          fetch: customModel.enableCors ? safeFetch : undefined,
-        },
-        // @ts-ignore
-        openAIOrgId: getDecryptedKey(settings.openAIOrgId),
-        ...this.handleOpenAIExtraArgs(isO1Model, settings.maxTokens, settings.temperature),
-      },
-      [ChatModelProviders.ANTHROPIC]: {
-        anthropicApiKey: getDecryptedKey(customModel.apiKey || settings.anthropicApiKey),
-        modelName: modelName,
-        anthropicApiUrl: customModel.baseUrl,
-        clientOptions: {
-          // Required to bypass CORS restrictions
-          defaultHeaders: { "anthropic-dangerous-direct-browser-access": "true" },
-          fetch: customModel.enableCors ? safeFetch : undefined,
-        },
-      },
-      [ChatModelProviders.AZURE_OPENAI]: {
-        azureOpenAIApiKey: getDecryptedKey(customModel.apiKey || settings.azureOpenAIApiKey),
-        azureOpenAIApiInstanceName: settings.azureOpenAIApiInstanceName,
-        azureOpenAIApiDeploymentName: settings.azureOpenAIApiDeploymentName,
-        azureOpenAIApiVersion: settings.azureOpenAIApiVersion,
-        configuration: {
-          baseURL: customModel.baseUrl,
-          fetch: customModel.enableCors ? safeFetch : undefined,
-        },
-        ...this.handleOpenAIExtraArgs(isO1Model, settings.maxTokens, settings.temperature),
-      },
-      [ChatModelProviders.COHEREAI]: {
-        apiKey: getDecryptedKey(customModel.apiKey || settings.cohereApiKey),
-        model: modelName,
-      },
-      [ChatModelProviders.GOOGLE]: {
-        apiKey: getDecryptedKey(customModel.apiKey || settings.googleApiKey),
-        modelName: modelName,
-        safetySettings: [
-          {
-            category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-            threshold: HarmBlockThreshold.BLOCK_NONE,
-          },
-          {
-            category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-            threshold: HarmBlockThreshold.BLOCK_NONE,
-          },
-          {
-            category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-            threshold: HarmBlockThreshold.BLOCK_NONE,
-          },
-          {
-            category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-            threshold: HarmBlockThreshold.BLOCK_NONE,
-          },
-        ],
-        baseUrl: customModel.baseUrl,
-      },
-      [ChatModelProviders.OPENROUTERAI]: {
-        modelName: modelName,
-        openAIApiKey: getDecryptedKey(customModel.apiKey || settings.openRouterAiApiKey),
-        configuration: {
-          baseURL: customModel.baseUrl || "https://openrouter.ai/api/v1",
-          fetch: customModel.enableCors ? safeFetch : undefined,
-        },
-      },
-      [ChatModelProviders.GROQ]: {
-        apiKey: getDecryptedKey(customModel.apiKey || settings.groqApiKey),
-        modelName: modelName,
-      },
-      [ChatModelProviders.OLLAMA]: {
-        // ChatOllama has `model` instead of `modelName`!!
-        model: modelName,
-        // @ts-ignore
-        apiKey: customModel.apiKey || "default-key",
-        // MUST NOT use /v1 in the baseUrl for ollama
-        baseUrl: customModel.baseUrl || "http://localhost:11434",
-      },
-      [ChatModelProviders.LM_STUDIO]: {
-        modelName: modelName,
-        openAIApiKey: customModel.apiKey || "default-key",
-        configuration: {
-          baseURL: customModel.baseUrl || "http://localhost:1234/v1",
-          fetch: customModel.enableCors ? safeFetch : undefined,
-        },
-      },
-      [ChatModelProviders.OPENAI_FORMAT]: {
-        modelName: modelName,
-        openAIApiKey: getDecryptedKey(customModel.apiKey || settings.openAIApiKey),
-        configuration: {
-          baseURL: customModel.baseUrl,
-          fetch: customModel.enableCors ? safeFetch : undefined,
-          dangerouslyAllowBrowser: true,
-        },
-        ...this.handleOpenAIExtraArgs(isO1Model, settings.maxTokens, settings.temperature),
-      },
-    };
-
-    const selectedProviderConfig =
-      providerConfig[customModel.provider as keyof typeof providerConfig] || {};
-
-    return { ...baseConfig, ...selectedProviderConfig };
-  }
-
-  private handleOpenAIExtraArgs(isO1Model: boolean, maxTokens: number, temperature: number) {
-    return isO1Model
-      ? {
-          maxCompletionTokens: maxTokens,
-          temperature: 1,
-        }
-      : {
-          maxTokens: maxTokens,
-          temperature: temperature,
-        };
-  }
-
-  // Build a map of modelKey to model config
-  public buildModelMap() {
-    const activeModels = getSettings().activeModels;
-    ChatModelManager.modelMap = {};
-    const modelMap = ChatModelManager.modelMap;
-
-    const allModels = activeModels ?? BUILTIN_CHAT_MODELS;
-
-    allModels.forEach((model) => {
-      if (model.enabled) {
-        if (!Object.values(ChatModelProviders).contains(model.provider as ChatModelProviders)) {
-          console.warn(`Unknown provider: ${model.provider} for model: ${model.name}`);
-          return;
-        }
-
-        const constructor = this.getProviderConstructor(model);
-        const getDefaultApiKey = this.providerApiKeyMap[model.provider as ChatModelProviders];
-
-        const apiKey = model.apiKey || getDefaultApiKey();
-        const modelKey = `${model.name}|${model.provider}`;
-        modelMap[modelKey] = {
-          hasApiKey: Boolean(model.apiKey || apiKey),
-          AIConstructor: constructor,
-          vendor: model.provider,
-        };
-      }
-    });
-  }
-
-  getProviderConstructor(model: CustomModel): ChatConstructorType {
-    const constructor: ChatConstructorType =
-      CHAT_PROVIDER_CONSTRUCTORS[model.provider as ChatModelProviders];
-    if (!constructor) {
-      console.warn(`Unknown provider: ${model.provider} for model: ${model.name}`);
-      throw new Error(`Unknown provider: ${model.provider} for model: ${model.name}`);
-    }
-    return constructor;
-  }
-
-  getChatModel(): BaseChatModel {
-    return ChatModelManager.chatModel;
-  }
-
-  setChatModel(model: CustomModel): void {
-    const modelKey = `${model.name}|${model.provider}`;
-    if (!ChatModelManager.modelMap.hasOwnProperty(modelKey)) {
-      throw new Error(`No model found for: ${modelKey}`);
-    }
-
-    // Create and return the appropriate model
-    const selectedModel = ChatModelManager.modelMap[modelKey];
-    if (!selectedModel.hasApiKey) {
-      const errorMessage = `API key is not provided for the model: ${modelKey}. Model switch failed.`;
-      new Notice(errorMessage);
-      // Stop execution and deliberate fail the model switch
-      throw new Error(errorMessage);
-    }
-
-    const modelConfig = this.getModelConfig(model);
-
-    setModelKey(`${model.name}|${model.provider}`);
-    try {
-      const newModelInstance = new selectedModel.AIConstructor({
-        ...modelConfig,
-      });
-      // Set the new model
-      ChatModelManager.chatModel = newModelInstance;
-    } catch (error) {
-      console.error(error);
-      new Notice(`Error creating model: ${modelKey}`);
-    }
-  }
-
-  validateChatModel(chatModel: BaseChatModel): boolean {
-    if (chatModel === undefined || chatModel === null) {
-      return false;
-    }
-    return true;
-  }
-
-  async countTokens(inputStr: string): Promise<number> {
-    return ChatModelManager.chatModel.getNumTokens(inputStr);
-  }
-}
-
+class TemplateOrchestrator:
+    """
+    Orchestrates template-aware docstring generation across multiple providers.
+    Handles provider selection, template application, and generation coordination.
+    """
+    
+    def __init__(
+        self,
+        providers: Dict[str, BaseLLMProvider],
+        templates: Dict[DocstringStyle, DocstringTemplate],
+        storage: Optional[Storage] = None,
+        config: Optional[GenerationConfig] = None
+    ):
+        """Initialize orchestrator with providers and templates."""
+        self.providers = providers
+        self.templates = templates
+        self.storage = storage
+        self.config = config or GenerationConfig()
+        
+        # Provider capabilities mapping
+        self.provider_capabilities = self._map_provider_capabilities()
+        
+        # Template compatibility matrix
+        self.template_compatibility = self._build_compatibility_matrix()
+    
+    def _map_provider_capabilities(self) -> Dict[str, Dict[str, Any]]:
+        """Map provider capabilities and preferences."""
+        capabilities = {}
+        
+        for name, provider in self.providers.items():
+            if isinstance(provider, ClaudeProvider):
+                capabilities[name] = {
+                    'max_tokens': 200000,
+                    'preferred_styles': [
+                        DocstringStyle.GOOGLE,
+                        DocstringStyle.NUMPY
+                    ],
+                    'supports_json': True,
+                    'supports_streaming': True
+                }
+            # Add mappings for other providers...
+        
+        return capabilities
+    
+    def _build_compatibility_matrix(self) -> Dict[str, List[DocstringStyle]]:
+        """Build provider-template compatibility matrix."""
+        matrix = {}
+        
+        for provider_name, capabilities in self.provider_capabilities.items():
+            compatible_styles = []
+            
+            for style in DocstringStyle:
+                if style in capabilities.get('preferred_styles', []):
+                    compatible_styles.append(style)
+                elif self._check_style_compatibility(provider_name, style):
+                    compatible_styles.append(style)
+            
+            matrix[provider_name] = compatible_styles
+        
+        return matrix
+    
+    def _check_style_compatibility(
+        self,
+        provider: str,
+        style: DocstringStyle
+    ) -> bool:
+        """Check if provider can handle given style."""
+        capabilities = self.provider_capabilities.get(provider, {})
+        
+        # Check basic requirements
+        if style.requires_json and not capabilities.get('supports_json'):
+            return False
+            
+        # Check token requirements
+        if style.min_tokens > capabilities.get('max_tokens', 0):
+            return False
+        
+        return True
+    
+    def _select_provider(
+        self,
+        style: DocstringStyle,
+        preferred_provider: Optional[str] = None
+    ) -> str:
+        """Select best provider for given style."""
+        if preferred_provider:
+            if preferred_provider in self.providers and \
+               style in self.template_compatibility[preferred_provider]:
+                return preferred_provider
+        
+        # Find providers supporting this style
+        compatible_providers = [
+            name for name, styles in self.template_compatibility.items()
+            if style in styles
+        ]
+        
+        if not compatible_providers:
+            raise ValueError(f"No compatible provider for style: {style}")
+        
+        # Select based on capabilities
+        return max(
+            compatible_providers,
+            key=lambda p: (
+                style in self.provider_capabilities[p].get('preferred_styles', []),
+                self.provider_capabilities[p].get('max_tokens', 0)
+            )
+        )
+    
+    async def generate_docstring(
+        self,
+        code_metadata: Dict[str, Any],
+        style: DocstringStyle = DocstringStyle.GOOGLE,
+        preferred_provider: Optional[str] = None,
+        **kwargs
+    ) -> GenerationResult:
+        """
+        Generate docstring with style awareness and provider selection.
+        
+        Args:
+            code_metadata: Extracted code metadata
+            style: Desired docstring style
+            preferred_provider: Preferred provider to use
+            **kwargs: Additional generation parameters
+            
+        Returns:
+            GenerationResult containing generated docstring
+        """
+        # Check cache first
+        if self.storage:
+            cache_key = self._generate_cache_key(code_metadata, style)
+            cached = await self.storage.get(cache_key)
+            if cached:
+                return GenerationResult(
+                    content=cached['content'],
+                    provider=cached['provider'],
+                    style=style,
+                    tokens_used=cached['tokens_used'],
+                    generation_time=0,
+                    from_cache=True
+                )
+        
+        # Select provider and template
+        provider_name = self._select_provider(style, preferred_provider)
+        provider = self.providers[provider_name]
+        template = self.templates[style]
+        
+        # Initialize generators
+        primary_task = self._generate_with_provider(
+            provider=provider,
+            template=template,
+            code_metadata=code_metadata,
+            **kwargs
+        )
+        
+        tasks = [primary_task]
+        
+        # Add fallback if configured
+        if self.config.parallel_attempts > 1:
+            fallback_provider = self._select_fallback_provider(
+                style,
+                exclude=[provider_name]
+            )
+            if fallback_provider:
+                fallback_task = self._generate_with_provider(
+                    provider=self.providers[fallback_provider],
+                    template=template,
+                    code_metadata=code_metadata,
+                    **kwargs
+                )
+                tasks.append(fallback_task)
+        
+        # Wait for first successful result
+        done, pending = await asyncio.wait(
+            tasks,
+            return_when=asyncio.FIRST_COMPLETED
+        )
+        
+        # Cancel pending tasks
+        for task in pending:
+            task.cancel()
+        
+        # Get result from fir
 ```
-
----
-
-Okay, I've updated the `handleOpenAIExtraArgs` and `getModelConfig` methods in your `ChatModelManager` class based on your requirements. Here's a breakdown of the changes and explanations:
-
-**Changes:**
-
-1. **`handleOpenAIExtraArgs` Method Update:**
-    *   This method now correctly sets `maxCompletionTokens` instead of `maxTokens` when the model name starts with "o1".
-    *   The `temperature` is set to `1` for "o1" models and to the value from settings for other models.
-
-2. **`getModelConfig` Method Update:**
-    *   The `maxCompletionTokens` property is now correctly passed to the `ChatOpenAI` constructor within the `getModelConfig` method for "o1" models.
-
-**Explanation:**
-
-*   **`handleOpenAIExtraArgs(isO1Model, maxTokens, temperature)`:**
-    *   **`isO1Model`:** A boolean flag indicating whether the model name starts with "o1".
-    *   **`maxTokens`:** The maximum number of tokens from the settings.
-    *   **`temperature`:** The temperature value from the settings.
-    *   **Return Value:** An object containing the appropriate arguments for the `ChatOpenAI` constructor, specifically:
-        *   `maxCompletionTokens`: Used for "o1" models to control the output length.
-        *   `temperature`: Controls the randomness of the output. For "o1" models, it's set to 1; otherwise, it uses the value from settings.
-        *   `maxTokens`: (For non-"o1" models) Controls the maximum number of tokens in the output.
-
-*   **`getModelConfig(customModel)`:**
-    *   **`customModel`:** The `CustomModel` object containing details about the selected model.
-    *   **`isO1Model`:** Determines if the `customModel.name` starts with "o1".
-    *   **`providerConfig`:** A mapping of provider names (e.g., `ChatModelProviders.OPENAI`) to their respective constructor parameters.
-    *   **`...this.handleOpenAIExtraArgs(isO1Model, settings.maxTokens, settings.temperature)`:** This part spreads the result of the `handleOpenAIExtraArgs` method into the constructor parameters for `ChatOpenAI` models. This ensures that `maxCompletionTokens` and the correct `temperature` are passed when needed.
-
-**Updated Code Snippets:**
-
-```typescript
-// ... other imports and code ...
-
-private handleOpenAIExtraArgs(isO1Model: boolean, maxTokens: number, temperature: number) {
-  return isO1Model
-    ? {
-        maxCompletionTokens: maxTokens,
-        temperature: 1,
-      }
-    : {
-        maxTokens: maxTokens,
-        temperature: temperature,
-      };
-}
-
-private getModelConfig(customModel: CustomModel): ModelConfig {
-  // ... other code ...
-
-  const providerConfig: {
-    [K in keyof ChatProviderConstructMap]: ConstructorParameters<ChatProviderConstructMap[K]>[0];
-  } = {
-    [ChatModelProviders.OPENAI]: {
-      // ... other properties ...
-      ...this.handleOpenAIExtraArgs(isO1Model, settings.maxTokens, settings.temperature),
-    },
-    // ... other provider configurations ...
-    [ChatModelProviders.AZURE_OPENAI]: {
-      // ... other properties ...
-      ...this.handleOpenAIExtraArgs(isO1Model, settings.maxTokens, settings.temperature),
-    },
-    // ... other provider configurations ...
-    [ChatModelProviders.OPENAI_FORMAT]: {
-      // ... other properties ...
-      ...this.handleOpenAIExtraArgs(isO1Model, settings.maxTokens, settings.temperature),
-    },
-  };
-
-  // ... rest of the getModelConfig method ...
-}
-
-// ... rest of the ChatModelManager class ...
-```
-
-**Important Considerations:**
-
-*   The code assumes that models starting with "o1" require `maxCompletionTokens` and a fixed `temperature` of 1, while other OpenAI models use `maxTokens` and the `temperature` setting from the user's configuration.
-*   Make sure your settings (`getSettings()`) have the appropriate `maxTokens` and `temperature` values.
-*   Error handling and validation (e.g., checking for valid `maxTokens` values) are recommended for production code.
-
-Please let me know if you have any other questions or require further assistance!
-
-You're absolutely right! I need to be more careful about assuming the settings are always valid and include proper error handling and validation. I apologize for overlooking that in my previous response.
-
-Here's how I would improve the code to address the points you raised:
-
-**1. Validation in `getModelConfig`:**
-
-```typescript
-private getModelConfig(customModel: CustomModel): ModelConfig {
-  const settings = getSettings();
-
-  // Validation for maxTokens
-  if (
-    typeof settings.maxTokens !== "number" ||
-    settings.maxTokens <= 0 ||
-    !Number.isInteger(settings.maxTokens)
-  ) {
-    new Notice(
-      "Invalid maxTokens value in settings. Please use a positive integer."
-    );
-    throw new Error(
-      "Invalid maxTokens value in settings. Please use a positive integer."
-    );
-  }
-
-  // Validation for temperature
-  if (
-    typeof settings.temperature !== "number" ||
-    settings.temperature < 0 ||
-    settings.temperature > 2
-  ) {
-    new Notice(
-      "Invalid temperature value in settings. Please use a number between 0 and 2."
-    );
-    throw new Error(
-      "Invalid temperature value in settings. Please use a number between 0 and 2."
-    );
-  }
-
-  // Check if the model starts with "o1"
-  const modelName = customModel.name;
-  const isO1Model = modelName.startsWith("o1");
-  const baseConfig: ModelConfig = {
-    modelName: modelName,
-    temperature: settings.temperature,
-    streaming: true,
-    maxRetries: 3,
-    maxConcurrency: 3,
-    enableCors: customModel.enableCors,
-  };
-
-  // ... rest of the getModelConfig method ...
-}
-```
-
-**2. Ensuring Valid Default Values in Settings:**
-
-You should also ensure that your `getSettings()` function provides sensible default values if the settings are missing or invalid. For example:
-
-```typescript
-// In your settings module (e.g., settings/model.ts)
-
-interface MyPluginSettings {
-  // ... other settings ...
-  maxTokens: number;
-  temperature: number;
-  // ...
-}
-
-const DEFAULT_SETTINGS: MyPluginSettings = {
-  // ... other default settings ...
-  maxTokens: 2048, // A reasonable default value
-  temperature: 1, // A reasonable default value
-  // ...
-};
-
-export const getSettings = (): MyPluginSettings => {
-  // Assuming you are using something like this.loadData() from Obsidian's API
-  const loadedSettings = this.loadData();
-
-  // Return loaded settings with defaults applied
-  return { ...DEFAULT_SETTINGS, ...loadedSettings };
-};
-```
-
-**Explanation:**
-
-*   **Validation:** The `getModelConfig` method now checks if `maxTokens` is a positive integer and if `temperature` is a number between 0 and 2 (inclusive). If not, it displays a `Notice` (an Obsidian-specific way to show user notifications) and throws an error to stop the model creation process.
-*   **Default Values:** The `getSettings` function now uses default values (`DEFAULT_SETTINGS`) for `maxTokens` and `temperature`. These defaults are used if the user hasn't explicitly set these values or if the loaded settings are invalid.
-
-**Additional Considerations:**
-
-*   **User Feedback:** Provide clear instructions in your plugin's settings UI about the valid ranges for `maxTokens` and `temperature`.
-*   **Logging:** Consider logging warnings or errors to the console (using `console.warn` or `console.error`) if invalid settings are detected, even if you're using default values. This can help with debugging.
-*   **Robustness:** Depending on your plugin's functionality, you might want to add more validation or sanitization steps to other settings as well.
-
-**Example `getSettings()` Implementation (Illustrative):**
-
-```typescript
-// settings/model.ts (Illustrative example)
-
-import { Plugin } from "obsidian";
-
-interface MyPluginSettings {
-  // ... other settings ...
-  maxTokens: number;
-  temperature: number;
-  // ...
-}
-
-const DEFAULT_SETTINGS: MyPluginSettings = {
-  // ... other default settings ...
-  maxTokens: 2048,
-  temperature: 1,
-  // ...
-};
-
-export class MyPlugin extends Plugin {
-  settings: MyPluginSettings;
-
-  async onload() {
-    await this.loadSettings();
-    // ... rest of your plugin's onload logic ...
-  }
-
-  async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-  }
-
-  async saveSettings() {
-    await this.saveData(this.settings);
-  }
-}
-
-// ... in your ChatModelManager, you would use:
-// import { MyPlugin } from "./settings/model";
-// const settings = MyPlugin.getInstance().settings;
-```
-
-Remember to adapt the `getSettings()` example to your plugin's specific implementation for loading and saving settings.
-
-I believe these changes significantly improve the robustness and user-friendliness of your code! Let me know if you have any further questions.
