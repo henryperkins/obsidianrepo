@@ -14,6 +14,20 @@ tags:
   - "#api-usage"
   - "#configuration"
   - "#typescript-programming"
+  - obsidian-integration
+  - plugin-development
+  - javascript-components
+  - plugin-structure
+  - file-organization
+  - obsidian-plugin
+  - php-integration
+  - code-security
+  - code-implementation
+  - documentation
+  - best-practices
+  - api-usage
+  - configuration
+  - typescript-programming
 ---
 
 # Obsidian Plugin Development Guide
